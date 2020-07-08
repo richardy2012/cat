@@ -1,5 +1,24 @@
+/*
+ * Copyright (c) 2011-2018, Meituan Dianping. All Rights Reserved.
+ *
+ * Licensed to the Apache Software Foundation (ASF) under one or more
+ * contributor license agreements. See the NOTICE file distributed with
+ * this work for additional information regarding copyright ownership.
+ * The ASF licenses this file to You under the Apache License, Version 2.0
+ * (the "License"); you may not use this file except in compliance with
+ * the License. You may obtain a copy of the License at
+ *
+ *    http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
 package com.dianping.cat.configuration;
 
+import java.net.Inet4Address;
 import java.net.InetAddress;
 import java.net.NetworkInterface;
 import java.net.SocketException;
@@ -17,37 +36,31 @@ public enum NetworkInterfaceManager {
 		load();
 	}
 
-	public InetAddress findValidateIp(List<Address> addresses) {
+	public InetAddress findValidateIp(List<InetAddress> addresses) {
 		InetAddress local = null;
-		int size = addresses.size();
-		int maxWeight = -1;
-
-		for (int i = 0; i < size; i++) {
-			Address address = addresses.get(i);
-			int weight = 0;
-
-			if (address.isSiteLocalAddress()) {
-				weight += 8;
-			}
-
-			if (address.isLinkLocalAddress()) {
-				weight += 4;
-			}
-
-			if (address.isLoopbackAddress()) {
-				weight += 2;
-			}
-
-			if (address.hasHostName()) {
-				weight += 1;
-			}
-
-			if (weight > maxWeight) {
-				maxWeight = weight;
-				local = address.getAddress();
+		for (InetAddress address : addresses) {
+			if (address instanceof Inet4Address) {
+				if (address.isLoopbackAddress() || address.isSiteLocalAddress()) {
+					if (local == null) {
+						local = address;
+					} else if (address.isSiteLocalAddress() && !address.isLoopbackAddress()) {
+						// site local address has higher priority than other address
+						local = address;
+					} else if (local.isSiteLocalAddress() && address.isSiteLocalAddress()) {
+						// site local address with a host name has higher
+						// priority than one without host name
+						if (local.getHostName().equals(local.getHostAddress())	&& !address.getHostName()
+												.equals(address.getHostAddress())) {
+							local = address;
+						}
+					}
+				} else {
+					if (local == null) {
+						local = address;
+					}
+				}
 			}
 		}
-
 		return local;
 	}
 
@@ -90,17 +103,13 @@ public enum NetworkInterfaceManager {
 
 		try {
 			List<NetworkInterface> nis = Collections.list(NetworkInterface.getNetworkInterfaces());
-			List<Address> addresses = new ArrayList<Address>();
+			List<InetAddress> addresses = new ArrayList<InetAddress>();
 			InetAddress local = null;
 
 			try {
 				for (NetworkInterface ni : nis) {
 					if (ni.isUp()) {
-						List<InetAddress> list = Collections.list(ni.getInetAddresses());
-
-						for (InetAddress address : list) {
-							addresses.add(new Address(address, ni));
-						}
+						addresses.addAll(Collections.list(ni.getInetAddresses()));
 					}
 				}
 				local = findValidateIp(addresses);
@@ -110,44 +119,6 @@ public enum NetworkInterfaceManager {
 			m_local = local;
 		} catch (SocketException e) {
 			// ignore it
-		}
-	}
-
-	static class Address {
-		private InetAddress m_address;
-
-		private boolean m_loopback;
-
-		public Address(InetAddress address, NetworkInterface ni) {
-			m_address = address;
-
-			try {
-				if (ni != null && ni.isLoopback()) {
-					m_loopback = true;
-				}
-			} catch (SocketException e) {
-				// ignore it
-			}
-		}
-
-		public InetAddress getAddress() {
-			return m_address;
-		}
-
-		public boolean hasHostName() {
-			return !m_address.getHostName().equals(m_address.getHostAddress());
-		}
-
-		public boolean isLinkLocalAddress() {
-			return !m_loopback && m_address.isLinkLocalAddress();
-		}
-
-		public boolean isLoopbackAddress() {
-			return m_loopback || m_address.isLoopbackAddress();
-		}
-
-		public boolean isSiteLocalAddress() {
-			return !m_loopback && m_address.isSiteLocalAddress();
 		}
 	}
 }
